@@ -176,10 +176,12 @@ target_link_libraries(first PRIVATE
 
 add_library(Lanczos INTERFACE)
 target_include_directories(Lanczos INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(Lanczos SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external)
 target_link_libraries(Lanczos INTERFACE Boost::boost Boost::program_options
-    Boost::stacktrace_addr2line intel_tbb stdc++fs)
+    Boost::stacktrace_addr2line stdc++fs Threads::Threads)
 target_compile_definitions(Lanczos INTERFACE BOOST_ALL_DYN_LINK
     BOOST_ENABLE_ASSERT_HANDLER BOOST_STACKTRACE_USE_BACKTRACE)
+target_compile_options(Lanczos INTERFACE ${NQS_WARNING_FLAGS})
 # target_link_libraries(Lanczos INTERFACE -fsanitize=address)
 # target_compile_options(Lanczos INTERFACE -fsanitize=address)
 

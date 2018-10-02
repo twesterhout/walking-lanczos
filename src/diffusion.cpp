@@ -31,19 +31,20 @@
 
 #include "diffusion.hpp"
 #include "quantum_state.hpp"
-#include <tbb/parallel_for.h>
 
 auto diffusion_step(double const lambda, Hamiltonian const& hamiltonian,
     QuantumState const& psi) -> QuantumState
 {
-    QuantumState h_psi{psi.soft_max(), psi.hard_max()};
-    tbb::parallel_for(
-        psi.range(), [&h_psi, &hamiltonian, lambda](auto const& elements) {
-            for (auto [spin, coeff] : elements) {
-                hamiltonian(spin, -coeff, h_psi);
-                h_psi += {coeff * lambda, spin};
-            }
-        });
+    QuantumState h_psi{psi.soft_max(), psi.hard_max(), psi.number_workers()};
+    QuantumStateBuilder h_psi_builder{h_psi};
+
+    h_psi_builder.start();
+    psi.for_each([&h_psi_builder, &hamiltonian, lambda](auto const& x) {
+        auto const [spin, coeff] = x;
+        hamiltonian(spin, -coeff, h_psi_builder);
+        h_psi_builder += {coeff * lambda, spin};
+    });
+    h_psi_builder.stop();
     h_psi.normalize();
     return h_psi;
 }
@@ -51,12 +52,18 @@ auto diffusion_step(double const lambda, Hamiltonian const& hamiltonian,
 auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
     QuantumState const& psi, std::size_t const iterations) -> QuantumState
 {
-    if (iterations == 0) return psi;
-    auto state = diffusion_step(lambda, hamiltonian, psi);
+    if (iterations == 0) {
+        throw_with_trace(
+            std::runtime_error{"Number of iterations must be positive!"});
+    }
+    std::cerr << "[1/" << iterations << "]";
+    QuantumState state = diffusion_step(lambda, hamiltonian, psi);
     for (auto i = 1ul; i < iterations; ++i) {
+        std::cerr << "\r[" << (i + 1) << "/" << iterations << "]";
         state = diffusion_step(lambda, hamiltonian, state);
         state.shrink();
     }
+    std::cerr << std::endl;
     return state;
 }
 

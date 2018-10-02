@@ -31,81 +31,45 @@
 
 #include "hamiltonian.hpp"
 #include "quantum_state.hpp"
-#include <tbb/parallel_for.h>
-#include <tbb/parallel_reduce.h>
 
 auto Heisenberg::operator()(SpinVector spin, std::complex<double> coeff,
-    QuantumState& psi) const -> void
+    QuantumStateBuilder& psi) const -> void
 {
-    // Returns a function that, given an edge, applies the part of H that
-    // corresponds to that edge to psi.
-    auto make_single_edge_kernel = [coeff, spin, &psi](auto const coupling) {
-        return [spin, &psi, coeff, coupling](edge_type const edge) -> void {
-            auto const [i, j]  = edge;
+    for (auto const& [coupling, edges] : _specs) {
+        for (auto const& [i, j] : edges) {
             auto const aligned = spin[i] == spin[j];
             auto const sign    = static_cast<double>(-1 + 2 * aligned);
             psi += {sign * coeff * coupling, spin};
             if (!aligned) {
                 psi += {2.0 * coeff * coupling, spin.flipped({i, j})};
             }
-        };
-    };
-
-    tbb::parallel_for(
-        0ul, _specs.size(), [this, make_single_edge_kernel](auto const i) {
-            auto const  hopping = std::get<0>(_specs[i]);
-            auto const& edges   = std::get<1>(_specs[i]);
-            std::for_each(std::cbegin(edges), std::cend(edges),
-                make_single_edge_kernel(hopping));
-        });
+        }
+    }
 }
 
 auto energy(Hamiltonian const& hamiltonian, QuantumState const& psi)
     -> std::complex<double>
 {
-    QuantumState h_psi{psi.soft_max(), psi.hard_max()};
-    tbb::parallel_for(
-        psi.range(), [&h_psi, &hamiltonian](auto const& elements) {
-            for (auto [spin, coeff] : elements) {
-                hamiltonian(spin, coeff, h_psi);
-            }
-        });
+    QuantumState h_psi{psi.soft_max(), psi.hard_max(), psi.number_workers()};
+    QuantumStateBuilder h_psi_builder{h_psi};
 
-    struct Energy {
-        constexpr Energy(QuantumState const& psi) noexcept
-            : _psi{psi}, _energy{0}
-        {
-        }
-        constexpr Energy(Energy const& other, tbb::split /*unused*/) noexcept
-            : _psi{other._psi}, _energy{0}
-        {
-        }
-        auto operator()(QuantumState::const_range_type& range) -> void
-        {
-            for (auto [spin, coeff] : range) {
-                auto const where = _psi.find(spin);
-                if (where != _psi.end()) {
-                    _energy += std::conj(where->second) * coeff;
-                }
-            }
-        }
-        constexpr auto join(Energy const& other) noexcept
-        {
-            _energy += other._energy;
-        }
-        constexpr auto get() const noexcept { return _energy; }
+    h_psi_builder.start();
+    psi.for_each([&h_psi_builder, &hamiltonian](auto const& x) {
+        hamiltonian(x.first, x.second, h_psi_builder);
+    });
+    h_psi_builder.stop();
 
-      private:
-        QuantumState const&  _psi;
-        std::complex<double> _energy;
-    };
-
-    Energy energy{psi};
-    tbb::parallel_reduce(h_psi.range(), energy);
-    return energy.get();
+    std::complex<double> energy;
+    psi.for_each([&energy, &h_psi](auto const& x) {
+        auto const where = h_psi.find(x.first);
+        if (where.has_value()) {
+            energy += std::conj(x.second) * (*where)->second;
+        }
+    });
+    return energy;
 }
 
-auto operator>>(std::istream& is, std::pair<int, int>& x) -> std::istream&
+auto operator>>(std::istream& is, std::pair<int, int>& edge) -> std::istream&
 {
     char       ch;
     auto const expect = [&ch, &is](auto const x) {
@@ -118,9 +82,9 @@ auto operator>>(std::istream& is, std::pair<int, int>& x) -> std::istream&
     };
     is >> ch;
     expect('(');
-    is >> std::ws >> x.first >> std::ws >> ch;
+    is >> std::ws >> edge.first >> std::ws >> ch;
     expect(',');
-    is >> std::ws >> x.second >> std::ws >> ch;
+    is >> std::ws >> edge.second >> std::ws >> ch;
     expect(')');
     return is;
 }
@@ -141,13 +105,14 @@ auto operator>>(std::istream& is, std::vector<T>& x) -> std::istream&
         is.get();
         x.clear();
         return is;
-    } else {
+    }
+    else {
         is >> t;
         x.push_back(std::move(t));
     }
 
     do {
-        ch = (is >> std::ws).peek();
+        ch = static_cast<char>((is >> std::ws).peek());
         if (ch == ']') { is.get(); }
         else if (ch == ',') {
             is.get();

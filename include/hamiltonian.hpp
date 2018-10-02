@@ -37,9 +37,10 @@
 
 class SpinVector;
 class QuantumState;
+class QuantumStateBuilder;
 
-using Hamiltonian =
-    std::function<auto(SpinVector, std::complex<double>, QuantumState&)->void>;
+using Hamiltonian = std::function<
+    auto(SpinVector, std::complex<double>, QuantumStateBuilder&)->void>;
 
 auto energy(Hamiltonian const&, QuantumState const&) -> std::complex<double>;
 
@@ -72,8 +73,8 @@ class Heisenberg {
     Heisenberg& operator=(Heisenberg&&) noexcept = default;
 
     /// Performs |ψ〉+= c * H|σ〉.
-    auto operator()(SpinVector, std::complex<double>, QuantumState&) const
-        -> void;
+    auto operator()(
+        SpinVector, std::complex<double>, QuantumStateBuilder&) const -> void;
 
     friend auto operator>>(std::istream&, Heisenberg&) -> std::istream&;
 };

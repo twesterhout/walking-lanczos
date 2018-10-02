@@ -30,70 +30,94 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "quantum_state.hpp"
-#include "format.hpp"
-#include <boost/config/workaround.hpp>
 #include <numeric>
 
-auto QuantumState::operator+=(std::pair<std::complex<double>, SpinVector> element)
-    -> QuantumState&
+auto QuantumState::clear() -> void
 {
-    auto [coeff, spin] = element;
-    auto where         = find(spin);
-    if (where == end()) {
-#if BOOST_WORKAROUND(__clang_major__, BOOST_TESTED_AT(8))
-        insert({spin, coeff});
-#else
-        emplace(spin, coeff);
-#endif
-        if (size() > _hard_max_size) {
-            std::cerr << "WARNING! hard_max_size exceeded: performance will be "
-                         "bad.\n";
-            remove_least(size() - _hard_max_size);
-        }
+    for (auto& table : _maps) {
+        table.clear();
     }
-    else {
-        where->second += coeff;
-    }
-    return *this;
 }
 
-auto QuantumState::operator-=(std::pair<std::complex<double>, SpinVector> element)
-    -> QuantumState&
+auto QuantumState::insert(value_type&& x) -> std::pair<map_type::iterator, bool>
 {
-    return (*this) += {-element.first, element.second};
+    return _maps[spin_to_index(x.first, _maps.size())].insert(std::move(x));
 }
 
 auto QuantumState::remove_least(std::size_t count) -> void
 {
-    std::vector<base::iterator> elements;
-    elements.reserve(size());
-    for (auto it = begin(); it != end(); ++it) {
-        elements.push_back(it);
+    _entries.clear();
+    for (auto const& table : _maps) {
+        for (auto const& x : table) {
+            _entries.push_back({x.first, std::norm(x.second)});
+        }
     }
-    std::sort(std::begin(elements), std::end(elements),
-        [](auto const& x, auto const& y) {
-            return std::norm(x->second) < std::norm(y->second);
-        });
+    std::sort(std::begin(_entries), std::end(_entries),
+        [](auto const& x, auto const& y) { return x.second < y.second; });
     for (std::size_t i = 0; i < count; ++i) {
-        unsafe_erase(elements[i]);
+        auto& table = _maps.at(spin_to_index(_entries[i].first, _maps.size()));
+        TCM_ASSERT(table.count(_entries[i].first));
+        table.erase(_entries[i].first);
     }
 }
 
 auto QuantumState::normalize() -> QuantumState&
 {
-    auto const norm  = std::accumulate(begin(), end(), 0.0,
-        [](auto const acc, auto const x) { return acc + std::norm(x.second); });
+    double norm = 0.0;
+    for (auto const& table : _maps) {
+        norm += std::accumulate(
+            table.begin(), table.end(), 0.0, [](auto const acc, auto const& x) {
+                return acc + std::norm(x.second);
+            });
+    }
     auto const scale = 1.0 / std::sqrt(norm);
-    for (auto& [_, coeff] : *this) {
-        coeff *= scale;
+    for (auto& table : _maps) {
+        for (auto& [_, coeff] : table) {
+            coeff *= scale;
+        }
     }
     return *this;
 }
 
 auto QuantumState::shrink() -> void
 {
-    if (size() > _soft_max_size) {
-        remove_least(size() - _soft_max_size);
-    }
+    auto const size = std::accumulate(std::begin(_maps), std::end(_maps), 0ul,
+        [](auto const acc, auto const& x) { return acc + x.size(); });
+    if (size > _soft_max_size) { remove_least(size - _soft_max_size); }
 }
 
+auto operator<<(std::ostream& out, QuantumState const& psi) -> std::ostream&
+{
+    psi.for_each([&out](auto const& x) {
+        out << x.first << '\t' << x.second.real() << '\t' << x.second.imag()
+            << '\n';
+    });
+    return out;
+}
+
+auto operator>>(std::istream& is, QuantumState& x) -> std::istream&
+{
+    std::string line;
+    SpinVector  spin;
+    double      real, imag;
+    x.clear();
+    while (std::getline(is, line)) {
+        if (!line.empty() && line.front() != '#') {
+            std::istringstream line_stream{line};
+            if ((line_stream >> spin >> real >> imag).fail()) {
+                is.setstate(std::ios_base::failbit);
+                throw_with_trace(std::runtime_error{"Failed to parse |ψ₀〉."});
+            }
+            if (!x.insert({spin, std::complex{real, imag}}).second) {
+                is.setstate(std::ios_base::failbit);
+                throw_with_trace(std::runtime_error{
+                    "Failed to parse |ψ₀〉: Duplicate basis elements."});
+            }
+        }
+    }
+    if (!is.eof()) {
+        is.setstate(std::ios_base::failbit);
+        throw_with_trace(std::runtime_error{"Failed to parse |ψ₀〉."});
+    }
+    return is;
+}

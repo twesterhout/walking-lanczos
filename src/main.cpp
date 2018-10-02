@@ -1,22 +1,50 @@
+// Copyright Tom Westerhout (c) 2018
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+//     * Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//
+//     * Redistributions in binary form must reproduce the above
+//       copyright notice, this list of conditions and the following
+//       disclaimer in the documentation and/or other materials provided
+//       with the distribution.
+//
+//     * Neither the name of Tom Westerhout nor the names of other
+//       contributors may be used to endorse or promote products derived
+//       from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "hamiltonian.hpp"
 #include "diffusion.hpp"
-#include "quantum_state.hpp"
 #include "format.hpp"
+#include "hamiltonian.hpp"
+#include "quantum_state.hpp"
 #include <boost/exception/get_error_info.hpp>
-#include <boost/program_options.hpp>
 #include <boost/optional.hpp>
-#include <tbb/task_scheduler_init.h>
-#include <iostream>
-#include <fstream>
-#include <optional>
+#include <boost/program_options.hpp>
 #include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <optional>
 
 namespace po = boost::program_options;
 
-
-using IStreamPtr = std::unique_ptr<std::istream, void(*)(std::istream*)>;
-using OStreamPtr = std::unique_ptr<std::ostream, void(*)(std::ostream*)>;
+using IStreamPtr = std::unique_ptr<std::istream, void (*)(std::istream*)>;
+using OStreamPtr = std::unique_ptr<std::ostream, void (*)(std::ostream*)>;
 
 auto parse_options(int argc, char** argv, IStreamPtr& input_file,
     OStreamPtr& output_file, std::string& hamiltonian_file_name, double& lambda,
@@ -25,23 +53,28 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
 {
     std::string                  input_file_name;
     boost::optional<std::string> output_file_name;
-    po::options_description cmdline_options{"Command-line options"};
+    po::options_description      cmdline_options{"Command-line options"};
     // clang-format off
     cmdline_options.add_options()
-        ("help", "Produce help message.")
+        ("help", "Produce the help message.")
         ("input-file", po::value(&input_file_name)->required(),
-            "The file containing the initial quantum state.")
+            "File containing the initial quantum state. '-' can be used to "
+            "indicate that the initial state should be read from the standard input.")
         ("output-file,o", po::value(&output_file_name),
             "Where to save the final quantum state.")
         ("hamiltonian,H", po::value(&hamiltonian_file_name)->required(),
             "The file containing the Hamiltonian specification.")
-        ("lambda,L", po::value(&lambda)->default_value(1.0), "Λ.")
+        ("lambda,L", po::value(&lambda)->default_value(1.0),
+            "Value of Λ in the diffusion operator (H - Λ).")
         ("iterations,n", po::value(&iterations)->default_value(1.0),
-            "Number of iterations.")
+            "Number of application of (H - Λ) to perform.")
         ("max", po::value(&soft_max)->default_value(1000),
-            "Soft max on the number of elements.")
+            "Maximum number of elements to keep after each application of (H - Λ).")
         ("hard-max", po::value(&hard_max),
-            "Hard max on the number of elements.")
+            "Initial number of buckets in the hash table. This parameter should "
+            "be chosen carefully, because too low a value will result in a lot of "
+            "rehashing, but too high a value will use more memory and result in "
+            "more cache misses.")
     ;
     // clang-format on
     po::positional_options_description positional;
@@ -111,9 +144,8 @@ auto read_hamiltonian(std::string const& hamiltonian_file_name) -> Hamiltonian
 int main(int argc, char** argv)
 {
     try {
-        tbb::task_scheduler_init     init(2);
-        IStreamPtr                   input_file{nullptr, [](auto* p) {}};
-        OStreamPtr                   output_file{nullptr, [](auto* p) {}};
+        IStreamPtr                   input_file{nullptr, [](auto*) {}};
+        OStreamPtr                   output_file{nullptr, [](auto*) {}};
         std::string                  hamiltonian_file_name;
         double                       lambda;
         std::size_t                  iterations;
@@ -122,13 +154,11 @@ int main(int argc, char** argv)
 
         auto const proceed = parse_options(argc, argv, input_file, output_file,
             hamiltonian_file_name, lambda, iterations, soft_max, hard_max);
-        if (!proceed) {
-            return EXIT_SUCCESS;
-        }
+        if (!proceed) { return EXIT_SUCCESS; }
 
-        QuantumState state{soft_max, hard_max ? *hard_max : 2 * soft_max};
+        QuantumState state{soft_max, hard_max ? *hard_max : 2 * soft_max, 1};
         *input_file >> state;
-        auto const hamiltonian = read_hamiltonian(hamiltonian_file_name);
+        auto const hamiltonian    = read_hamiltonian(hamiltonian_file_name);
         auto const initial_energy = energy(hamiltonian, state);
         *output_file << "# Result of evaluating (Λ - H)ⁿ|ψ₀〉for\n"
                      << "# Λ = " << lambda << '\n'
@@ -142,13 +172,12 @@ int main(int argc, char** argv)
     catch (std::exception const& e) {
         auto const* st = boost::get_error_info<errinfo_backtrace>(e);
         std::cerr << "Error: " << e.what() << '\n';
-        if (st != nullptr) {
-            std::cerr << "Backtrace:\n" << *st << '\n';
-        }
+        if (st != nullptr) { std::cerr << "Backtrace:\n" << *st << '\n'; }
         return EXIT_FAILURE;
     }
     catch (...) {
-        std::cerr << "Error: " << "Unknown error occured." << '\n';
+        std::cerr << "Error: "
+                  << "Unknown error occured." << '\n';
         return EXIT_FAILURE;
     }
 }
