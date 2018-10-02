@@ -169,11 +169,6 @@ elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
         -Wstrict-overflow=1 -Wswitch-default -Wundef -Wno-unused)
 endif()
 
-add_executable(first first.cpp)
-target_link_libraries(first PRIVATE
-    Boost::boost Boost::program_options Boost::stacktrace_basic
-    Boost::stacktrace_addr2line intel_tbb)
-
 add_library(Lanczos INTERFACE)
 target_include_directories(Lanczos INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(Lanczos SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external)

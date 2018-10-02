@@ -30,7 +30,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "diffusion.hpp"
-#include "format.hpp"
 #include "hamiltonian.hpp"
 #include "quantum_state.hpp"
 #include <boost/exception/get_error_info.hpp>
