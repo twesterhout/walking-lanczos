@@ -1,0 +1,5 @@
+# Initial state to test the code on 12-site Kagome Hamiltonian.
+# <spin>	<real>	<imag>
+111111000000	1.0	0.2
+101010101010	0.25	-1
+110100011100	0.5	-0.1
