@@ -107,7 +107,7 @@ class QuantumState {
 
     constexpr auto soft_max() const noexcept { return _soft_max_size; }
     constexpr auto hard_max() const noexcept { return _hard_max_size; }
-    constexpr auto number_workers() const noexcept { return _maps.size(); }
+    auto number_workers() const noexcept { return _maps.size(); }
 
     constexpr auto& tables() & noexcept { return _maps; }
 
