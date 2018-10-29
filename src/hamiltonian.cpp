@@ -69,7 +69,8 @@ auto energy(Hamiltonian const& hamiltonian, QuantumState const& psi)
     return energy;
 }
 
-auto operator>>(std::istream& is, std::pair<int, int>& edge) -> std::istream&
+inline auto operator>>(std::istream& is, std::pair<int, int>& edge)
+    -> std::istream&
 {
     char       ch;
     auto const expect = [&ch, &is](auto const x) {

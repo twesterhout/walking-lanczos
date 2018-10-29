@@ -178,6 +178,10 @@ class SpinVector {
             switch (x) {
             case Spin::down: return '0';
             case Spin::up: return '1';
+#if defined(BOOST_GCC)
+            // GCC fails to notice that all cases have already been handled.
+            default: TCM_ASSERT(false); std::terminate();
+#endif
             }
         };
 
@@ -208,6 +212,13 @@ class SpinVector {
     }
 
   private:
+#if defined(BOOST_GCC)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#elif defined(BOOST_CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
+#endif
     union {
         struct {
             std::byte     spin[14];
@@ -216,6 +227,11 @@ class SpinVector {
         __m128i   as_ints;
     } _data;
     static_assert(sizeof(_data) == 16);
+#if defined(BOOST_GCC)
+#pragma GCC diagnostic pop
+#elif defined(BOOST_CLANG)
+#pragma clang diagnostic pop
+#endif
 };
 
 auto operator<<(std::ostream&, SpinVector const&) -> std::ostream&;

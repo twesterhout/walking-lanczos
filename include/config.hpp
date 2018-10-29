@@ -4,7 +4,7 @@
 #include <boost/config.hpp>
 #include <boost/exception/info.hpp>
 #include <boost/exception/enable_error_info.hpp>
-#include <boost/stacktrace/stacktrace.hpp>
+#include <boost/stacktrace.hpp>
 #include <exception>
 #include <iostream>
 #include <type_traits>
@@ -30,6 +30,10 @@ template <class E, class = std::enable_if_t<std::is_base_of_v<std::exception,
 }
 
 namespace boost {
+#if defined(BOOST_CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+#endif
 inline void assertion_failed_msg(char const* expr, char const* msg,
     char const* function, char const* /*file*/, long /*line*/)
 {
@@ -37,12 +41,15 @@ inline void assertion_failed_msg(char const* expr, char const* msg,
               << function << "': " << (msg ? msg : "<...>") << ".\n"
               << "Backtrace:\n"
               << boost::stacktrace::stacktrace() << '\n';
-    std::abort();
+    std::terminate();
 }
+#if defined(BOOST_CLANG)
+#pragma clang diagnostic pop
+#endif
 
 inline void assertion_failed(
     char const* expr, char const* function, char const* file, long line)
 {
-    ::boost::assertion_failed_msg(expr, 0 /*nullptr*/, function, file, line);
+    ::boost::assertion_failed_msg(expr, nullptr, function, file, line);
 }
 } // namespace boost

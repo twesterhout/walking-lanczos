@@ -8,6 +8,10 @@ auto operator<<(std::ostream& out, SpinVector const& x) -> std::ostream&
         switch (s) {
         case Spin::down: return '0';
         case Spin::up: return '1';
+#if defined(BOOST_GCC)
+        // GCC fails to notice that all cases have already been handled.
+        default: TCM_ASSERT(false); std::terminate();
+#endif
         }
     };
 
