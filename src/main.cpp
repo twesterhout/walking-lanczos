@@ -45,6 +45,7 @@ namespace po = boost::program_options;
 using IStreamPtr = std::unique_ptr<std::istream, void (*)(std::istream*)>;
 using OStreamPtr = std::unique_ptr<std::ostream, void (*)(std::ostream*)>;
 
+namespace {
 auto parse_options(int argc, char** argv, IStreamPtr& input_file,
     OStreamPtr& output_file, std::string& hamiltonian_file_name, double& lambda,
     std::size_t& iterations, std::size_t& soft_max,
@@ -111,6 +112,15 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
         output_file = OStreamPtr{std::addressof(std::cout), [](auto*) {}};
     }
     else {
+        // Issue #1: Prevent the user from overwriting the input file.
+        if (std::filesystem::exists({*output_file_name})
+            && input_file_name != "-"
+            && std::filesystem::equivalent(
+                   {*output_file_name}, {input_file_name})) {
+            throw std::runtime_error{"Input file '" + input_file_name
+                                     + "' and output file '" + *output_file_name
+                                     + "' are the same."};
+        }
         output_file = OStreamPtr{new std::ofstream{*output_file_name},
             [](auto* p) { std::default_delete<std::ostream>{}(p); }};
         if (!*output_file) {
@@ -139,6 +149,7 @@ auto read_hamiltonian(std::string const& hamiltonian_file_name) -> Hamiltonian
     }
     return {std::move(hamiltonian)};
 }
+} // namespace
 
 int main(int argc, char** argv)
 {
