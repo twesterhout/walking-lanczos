@@ -1,3 +1,6 @@
 [submodule "external/flat_hash_map"]
 	path = external/flat_hash_map
 	url = https://github.com/skarupke/flat_hash_map
+[submodule "external/span-lite"]
+	path = external/span-lite
+	url = https://github.com/martinmoene/span-lite
