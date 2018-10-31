@@ -29,44 +29,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "diffusion.hpp"
-#include "quantum_state.hpp"
+#pragma once
 
-auto trotter_step(double const lambda, Hamiltonian const& hamiltonian,
-    QuantumState const& psi) -> QuantumState
-{
-    QuantumState        h_psi{psi.soft_max(), psi.estimate_hard_max(),
-        psi.number_workers(), psi.uses_random_sampling()};
-    QuantumStateBuilder h_psi_builder{h_psi};
+#include "config.hpp"
+#include <random>
 
-    h_psi_builder.start();
-    psi.for_each([&h_psi_builder, &hamiltonian, lambda](auto const& x) {
-        auto const [spin, coeff] = x;
-        hamiltonian(spin, -coeff, h_psi_builder);
-        h_psi_builder += {coeff * lambda, spin};
-    });
-    h_psi_builder.stop();
-    return h_psi;
-}
+using RandomGenerator = std::mt19937;
 
-auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
-    QuantumState const& psi, std::size_t const iterations) -> QuantumState
-{
-    if (iterations == 0) {
-        throw_with_trace(
-            std::runtime_error{"Number of iterations must be positive!"});
-    }
-    std::cerr << "[1/" << iterations << "]";
-    QuantumState state = trotter_step(lambda, hamiltonian, psi);
-    state.shrink();
-    state.normalize();
-    for (auto i = 1ul; i < iterations; ++i) {
-        std::cerr << "\r[" << (i + 1) << "/" << iterations << "]";
-        state = trotter_step(lambda, hamiltonian, state);
-        state.shrink();
-        state.normalize();
-    }
-    std::cerr << std::endl;
-    return state;
-}
+BOOST_NOINLINE auto global_random_generator() noexcept -> RandomGenerator&;
 

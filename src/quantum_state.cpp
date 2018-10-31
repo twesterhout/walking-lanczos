@@ -30,6 +30,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "quantum_state.hpp"
+#include "random.hpp"
+#include "random_sample.hpp"
+#include <boost/math/special_functions/ulp.hpp>
+#include <nonstd/span.hpp>
 #include <numeric>
 
 auto QuantumState::clear() -> void
@@ -46,22 +50,66 @@ auto QuantumState::insert(value_type&& x) -> std::pair<map_type::iterator, bool>
 
 auto QuantumState::remove_least(std::size_t count) -> void
 {
-    _entries.clear();
-    for (auto const& table : _maps) {
-        for (auto const& x : table) {
-            _entries.push_back({x.first, std::norm(x.second)});
+    using std::begin, std::end;
+    using item_type  = std::pair<SpinVector, double>;
+    using index_type = nonstd::span<item_type>::index_type;
+    auto const size =
+        std::accumulate(std::begin(_maps), std::end(_maps), std::size_t{0},
+            [](auto const acc, auto const& x) { return acc + x.size(); });
+    auto const items_buffer = std::make_unique<item_type[]>(size);
+    auto const items        = nonstd::span<item_type>{
+        items_buffer.get(), static_cast<index_type>(size)};
+    {
+        auto i = std::size_t{0};
+        for (auto const& table : _maps) {
+            for (auto const& x : table) {
+                items[i++] = {x.first, std::norm(x.second)};
+            }
         }
     }
-    std::sort(std::begin(_entries), std::end(_entries),
+    std::partial_sort(begin(items), begin(items) + count, end(items),
         [](auto const& x, auto const& y) { return x.second < y.second; });
     for (std::size_t i = 0; i < count; ++i) {
-        auto& table = _maps.at(spin_to_index(_entries[i].first, _maps.size()));
-        TCM_ASSERT(table.count(_entries[i].first));
-        table.erase(_entries[i].first);
+        auto& table = _maps.at(spin_to_index(items[i].first, _maps.size()));
+        TCM_ASSERT(table.count(items[i].first));
+        table.erase(items[i].first);
     }
 }
 
-auto QuantumState::normalize() -> QuantumState&
+auto QuantumState::random_resample(std::size_t count, RandomGenerator& gen)
+    -> void
+{
+    using std::begin, std::end;
+    auto const size =
+        std::accumulate(std::begin(_maps), std::end(_maps), std::size_t{0},
+            [](auto const acc, auto const& x) { return acc + x.size(); });
+    auto const items_buffer = std::make_unique<value_type[]>(size);
+    auto const items = nonstd::span<value_type>{items_buffer.get(), size};
+    auto const weights_buffer = std::make_unique<double[]>(size);
+    auto const weights = nonstd::span<double>{weights_buffer.get(), size};
+    {
+        auto i = std::size_t{0};
+        for (auto const& table : _maps) {
+            for (auto const& x : table) {
+                items[i++] = x;
+            }
+        }
+    }
+    std::transform(begin(items), end(items), begin(weights),
+        [](auto const& x) { return std::norm(x.second); });
+
+    for (auto& table : _maps) {
+        table.clear();
+    }
+    WeightedDistribution dist{weights};
+    for (auto i = std::size_t{0}; i < count; ++i) {
+        auto const  index = dist(gen);
+        auto const& x     = items[index];
+        _maps[spin_to_index(x.first, _maps.size())].insert(x);
+    }
+}
+
+[[gnu::noinline]] auto QuantumState::normalize() -> QuantumState&
 {
     double norm = 0.0;
     for (auto const& table : _maps) {
@@ -79,11 +127,16 @@ auto QuantumState::normalize() -> QuantumState&
     return *this;
 }
 
-auto QuantumState::shrink() -> void
+[[gnu::noinline]] auto QuantumState::shrink() -> void
 {
-    auto const size = std::accumulate(std::begin(_maps), std::end(_maps), 0ul,
-        [](auto const acc, auto const& x) { return acc + x.size(); });
-    if (size > _soft_max_size) { remove_least(size - _soft_max_size); }
+    if (_use_random_sampling) {
+        random_resample(_soft_max_size, global_random_generator());
+    }
+    else {
+        auto const size = std::accumulate(std::begin(_maps), std::end(_maps),
+            0ul, [](auto const acc, auto const& x) { return acc + x.size(); });
+        if (size > _soft_max_size) { remove_least(size - _soft_max_size); }
+    }
 }
 
 auto operator<<(std::ostream& out, QuantumState const& psi) -> std::ostream&

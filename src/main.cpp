@@ -49,7 +49,7 @@ namespace {
 auto parse_options(int argc, char** argv, IStreamPtr& input_file,
     OStreamPtr& output_file, std::string& hamiltonian_file_name, double& lambda,
     std::size_t& iterations, std::size_t& soft_max,
-    boost::optional<std::size_t>& hard_max) -> bool
+    boost::optional<std::size_t>& hard_max, bool& use_random_sampling) -> bool
 {
     std::string                  input_file_name;
     boost::optional<std::string> output_file_name;
@@ -75,6 +75,8 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
             "be chosen carefully, because too low a value will result in a lot of "
             "rehashing, but too high a value will use more memory and result in "
             "more cache misses.")
+        ("random", po::value(&use_random_sampling)->default_value(false),
+            "Whether to use random sampling.")
     ;
     // clang-format on
     po::positional_options_description positional;
@@ -161,12 +163,15 @@ int main(int argc, char** argv)
         std::size_t                  iterations;
         std::size_t                  soft_max;
         boost::optional<std::size_t> hard_max;
+        bool                         use_random_sampling;
 
         auto const proceed = parse_options(argc, argv, input_file, output_file,
-            hamiltonian_file_name, lambda, iterations, soft_max, hard_max);
+            hamiltonian_file_name, lambda, iterations, soft_max, hard_max,
+            use_random_sampling);
         if (!proceed) { return EXIT_SUCCESS; }
 
-        QuantumState state{soft_max, hard_max ? *hard_max : 2 * soft_max, 1};
+        QuantumState state{soft_max, hard_max ? *hard_max : 2 * soft_max, 1,
+            use_random_sampling};
         *input_file >> state;
         auto const hamiltonian    = read_hamiltonian(hamiltonian_file_name);
         auto const initial_energy = energy(hamiltonian, state);

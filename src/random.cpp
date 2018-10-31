@@ -29,44 +29,24 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "diffusion.hpp"
-#include "quantum_state.hpp"
+#include "random.hpp"
 
-auto trotter_step(double const lambda, Hamiltonian const& hamiltonian,
-    QuantumState const& psi) -> QuantumState
+namespace {
+BOOST_FORCEINLINE auto seed_engine()
 {
-    QuantumState        h_psi{psi.soft_max(), psi.estimate_hard_max(),
-        psi.number_workers(), psi.uses_random_sampling()};
-    QuantumStateBuilder h_psi_builder{h_psi};
-
-    h_psi_builder.start();
-    psi.for_each([&h_psi_builder, &hamiltonian, lambda](auto const& x) {
-        auto const [spin, coeff] = x;
-        hamiltonian(spin, -coeff, h_psi_builder);
-        h_psi_builder += {coeff * lambda, spin};
-    });
-    h_psi_builder.stop();
-    return h_psi;
+    using Gen               = RandomGenerator;
+    constexpr std::size_t N = (Gen::word_size + 31) / 32 * Gen::state_size;
+    std::uint32_t         random_data[N];
+    std::random_device    source;
+    std::generate(
+        std::begin(random_data), std::end(random_data), std::ref(source));
+    std::seed_seq seeds(std::begin(random_data), std::end(random_data));
+    return Gen{seeds};
 }
+} // namespace
 
-auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
-    QuantumState const& psi, std::size_t const iterations) -> QuantumState
+BOOST_NOINLINE auto global_random_generator() noexcept -> RandomGenerator&
 {
-    if (iterations == 0) {
-        throw_with_trace(
-            std::runtime_error{"Number of iterations must be positive!"});
-    }
-    std::cerr << "[1/" << iterations << "]";
-    QuantumState state = trotter_step(lambda, hamiltonian, psi);
-    state.shrink();
-    state.normalize();
-    for (auto i = 1ul; i < iterations; ++i) {
-        std::cerr << "\r[" << (i + 1) << "/" << iterations << "]";
-        state = trotter_step(lambda, hamiltonian, state);
-        state.shrink();
-        state.normalize();
-    }
-    std::cerr << std::endl;
-    return state;
+    static thread_local auto generator = seed_engine();
+    return generator;
 }
-

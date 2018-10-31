@@ -32,6 +32,9 @@
 #include "hamiltonian.hpp"
 #include "quantum_state.hpp"
 
+#include <nonstd/span.hpp>
+#include <charconv>
+
 auto Heisenberg::operator()(SpinVector spin, std::complex<double> coeff,
     QuantumStateBuilder& psi) const -> void
 {
@@ -50,7 +53,8 @@ auto Heisenberg::operator()(SpinVector spin, std::complex<double> coeff,
 auto energy(Hamiltonian const& hamiltonian, QuantumState const& psi)
     -> std::complex<double>
 {
-    QuantumState h_psi{psi.soft_max(), psi.hard_max(), psi.number_workers()};
+    QuantumState        h_psi{psi.soft_max(), psi.estimate_hard_max(),
+        psi.number_workers(), psi.uses_random_sampling()};
     QuantumStateBuilder h_psi_builder{h_psi};
 
     h_psi_builder.start();
@@ -89,6 +93,103 @@ inline auto operator>>(std::istream& is, std::pair<int, int>& edge)
     expect(')');
     return is;
 }
+
+inline auto skip_spaces(nonstd::span<char const> const str) noexcept
+    -> nonstd::span<char const>
+{
+    using index_type = nonstd::span<char const>::index_type;
+    auto i           = index_type{0};
+    for (; i < str.size() && std::isspace(str[i]); ++i)
+        ;
+    return str.subspan(i);
+}
+
+inline auto parse_char(char const c, nonstd::span<char const> const str)
+    -> nonstd::span<char const>
+{
+    if (str.empty())
+        throw_with_trace(
+            std::runtime_error{"Expected '" + std::string{c}
+                               + "', but reached the end of input."});
+    if (str[0] != c)
+        throw_with_trace(
+            std::runtime_error{"Expected '" + std::string{c} + "', but got '"
+                               + std::string{str[0]} + "'."});
+    return str.subspan(1);
+}
+
+inline auto parse_int(nonstd::span<char const> str)
+    -> std::tuple<int, nonstd::span<char const>>
+{
+    int x;
+    auto [end, status] =
+        std::from_chars(str.data(), str.data() + str.size(), x);
+    if (status == std::errc::invalid_argument) {
+        auto const count = static_cast<std::size_t>(std::min(str.size(), 10l));
+        throw_with_trace(
+            std::runtime_error{"Expected an integer, but got \""
+                               + std::string(str.data(), count) + "...\"."});
+    }
+    if (status == std::errc::result_out_of_range) {
+        auto const count = static_cast<std::size_t>(end - str.data());
+        throw_with_trace(std::runtime_error{
+            "Encountered an overflow when parsing an integer from \""
+            + std::string(str.data(), count) + "\"."});
+    }
+    TCM_ASSERT(std::make_error_code(status) == std::error_code{});
+    return {x, str.subspan(end - str.data())};
+}
+
+inline auto parse_edge(nonstd::span<char const> str)
+    -> std::tuple<std::pair<int, int>, nonstd::span<char const>>
+{
+    std::pair<int, int> edge;
+    str                        = parse_char('(', skip_spaces(str));
+    std::tie(edge.first, str)  = parse_int(str);
+    str                        = parse_char(',', skip_spaces(str));
+    std::tie(edge.second, str) = parse_int(str);
+    str                        = parse_char(')', skip_spaces(str));
+    return {edge, str};
+}
+
+namespace {
+auto parse_adjacency_list(nonstd::span<char const> str)
+    -> std::tuple<std::vector<std::pair<int, int>>, nonstd::span<char const>>
+{
+    using index_type = nonstd::span<char const>::index_type;
+
+    str = skip_spaces(parse_char('[', skip_spaces(str)));
+    if (str.empty()) {
+        throw_with_trace(std::runtime_error{"Missing the closing ']'."});
+    }
+    if (str[0] == ']') { return {{}, str.subspan(1)}; }
+
+    std::pair<int, int>              edge;
+    std::vector<std::pair<int, int>> edges;
+
+    std::tie(edge, str) = parse_edge(str);
+    edges.push_back(edge);
+    do {
+        str = skip_spaces(str);
+        if (str.empty()) {
+            throw_with_trace(std::runtime_error{"Missing the closing ']'."});
+        }
+        else if (str[0] == ']') {
+            str = str.subspan(1);
+            break;
+        }
+        else if (str[0] == ',') {
+            std::tie(edge, str) = parse_edge(str.subspan(1));
+            edges.push_back(edge);
+        }
+        else {
+            throw_with_trace(std::runtime_error{
+                "Expected ',' or ']', but got '" + std::string{str[0]} + "'."});
+        }
+    } while (true);
+    return {edges, str};
+}
+} // namespace
 
 template <class T>
 auto operator>>(std::istream& is, std::vector<T>& x) -> std::istream&

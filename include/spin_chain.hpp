@@ -127,10 +127,9 @@ class SpinVector {
     };
 
   public:
-    constexpr auto size() const noexcept
-    {
-        return _data.size;
-    }
+    constexpr auto size() const noexcept { return _data.size; }
+
+    static constexpr auto max_size() noexcept { return 8 * sizeof(_data.spin); }
 
     constexpr auto operator[](int const i) const TCM_NOEXCEPT -> Spin
     {
@@ -172,6 +171,7 @@ class SpinVector {
         return _data.spin;
     }
 
+#if 0
     auto print(std::ostream& out) const -> std::ostream&
     {
         auto const to_char = [](Spin const x) TCM_NOEXCEPT -> char {
@@ -190,6 +190,7 @@ class SpinVector {
         }
         return out;
     }
+#endif
 
     auto operator==(SpinVector const other) const noexcept -> bool
     {
@@ -236,4 +237,6 @@ class SpinVector {
 
 auto operator<<(std::ostream&, SpinVector const&) -> std::ostream&;
 auto operator>>(std::istream&, SpinVector&) -> std::istream&;
+[[nodiscard]] auto fput_spin(SpinVector const&, std::FILE*) noexcept -> int;
+auto strtospin(char* const str, char** const str_end) -> SpinVector;
 

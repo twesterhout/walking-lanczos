@@ -31,11 +31,13 @@
 
 #pragma once
 
+#include "random.hpp"
 #include "spin_chain.hpp"
 #include <complex>
 #include <iosfwd>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -65,21 +67,25 @@ class QuantumState {
 
   private:
     std::vector<map_type>                      _maps;
-    std::vector<std::pair<SpinVector, double>> _entries;
     std::size_t                                _soft_max_size;
     std::size_t                                _hard_max_size;
+    bool                                       _use_random_sampling;
 
   public:
     static constexpr auto round_down_to_power_of_two(std::size_t) noexcept
         -> std::size_t;
 
-    QuantumState(
-        std::size_t soft_max, std::size_t hard_max, std::size_t number_workers)
+    QuantumState(std::size_t const soft_max, std::size_t const hard_max,
+        std::size_t const number_workers, bool const use_random_sampling)
         : _maps{}
-        , _entries{}
         , _soft_max_size{soft_max}
         , _hard_max_size{hard_max}
+        , _use_random_sampling{use_random_sampling}
     {
+        if (soft_max < 2u) {
+            throw_with_trace(
+                std::invalid_argument{"`soft_max` must be at least 2."});
+        }
         _maps.reserve(number_workers);
         for (std::size_t i = 0; i < number_workers; ++i) {
             _maps.emplace_back(hard_max);
@@ -107,7 +113,21 @@ class QuantumState {
 
     constexpr auto soft_max() const noexcept { return _soft_max_size; }
     constexpr auto hard_max() const noexcept { return _hard_max_size; }
+    constexpr auto uses_random_sampling() const noexcept
+    {
+        return _use_random_sampling;
+    }
     auto number_workers() const noexcept { return _maps.size(); }
+
+    auto estimate_hard_max() const noexcept -> std::size_t
+    {
+        using std::begin, std::end;
+        return std::max_element(begin(_maps), end(_maps),
+            [](auto const& x, auto const& y) {
+                return x.bucket_count() < y.bucket_count();
+            })
+            ->bucket_count();
+    }
 
     constexpr auto& tables() & noexcept { return _maps; }
 
@@ -119,6 +139,7 @@ class QuantumState {
 
   private:
     auto remove_least(std::size_t count) -> void;
+    auto random_resample(std::size_t count, RandomGenerator& gen) -> void;
 };
 
 template <class Function>

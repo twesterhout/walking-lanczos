@@ -88,6 +88,7 @@ endif()
 
 target_include_directories(Lanczos INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(Lanczos SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external)
+target_include_directories(Lanczos SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/span-lite/include)
 # Getting rid of warning in Boost
 target_include_directories(Lanczos SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
 target_link_libraries(Lanczos INTERFACE # Boost::boost

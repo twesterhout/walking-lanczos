@@ -35,7 +35,7 @@
 
 class QuantumState;
 
-auto diffusion_step(double, Hamiltonian const&, QuantumState const&)
+auto trotter_step(double, Hamiltonian const&, QuantumState const&)
     -> QuantumState;
 
 auto diffusion_loop(double, Hamiltonian const&, QuantumState const&,
