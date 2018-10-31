@@ -48,16 +48,6 @@ struct SpinHasher {
     auto operator()(SpinVector x) const noexcept { return x.hash(); }
 };
 
-static constexpr auto spin_to_index(
-    SpinVector spin, std::size_t number_workers) noexcept -> std::size_t
-{
-    TCM_ASSERT(
-        number_workers > 0 && (number_workers & (number_workers - 1)) == 0);
-    auto const used_bits =
-        __builtin_popcount(static_cast<unsigned>(number_workers) - 1u);
-    return std::to_integer<std::size_t>(*spin.data() >> (8 - used_bits));
-}
-
 class QuantumState {
 
   public:
@@ -66,26 +56,33 @@ class QuantumState {
     using value_type = map_type::value_type;
 
   private:
-    std::vector<map_type>                      _maps;
-    std::size_t                                _soft_max_size;
-    std::size_t                                _hard_max_size;
-    bool                                       _use_random_sampling;
+    std::vector<map_type> _maps;
+    std::byte             _index_mask;
+    std::size_t           _soft_max_size;
+    std::size_t           _hard_max_size;
+    bool                  _use_random_sampling;
 
   public:
-    static constexpr auto round_down_to_power_of_two(std::size_t) noexcept
-        -> std::size_t;
-
     QuantumState(std::size_t const soft_max, std::size_t const hard_max,
         std::size_t const number_workers, bool const use_random_sampling)
         : _maps{}
+        , _index_mask{}
         , _soft_max_size{soft_max}
         , _hard_max_size{hard_max}
         , _use_random_sampling{use_random_sampling}
     {
+        TCM_ASSERT(number_workers != 0 && (number_workers & (number_workers - 1)) == 0);
         if (soft_max < 2u) {
             throw_with_trace(
                 std::invalid_argument{"`soft_max` must be at least 2."});
         }
+        // Because of spin_to_index
+        if (number_workers > (1u << 8)) {
+            throw_with_trace(std::invalid_argument{
+                "Currently, at most 64 workers can be used."});
+        }
+
+        _index_mask = std::byte{number_workers - 1u};
         _maps.reserve(number_workers);
         for (std::size_t i = 0; i < number_workers; ++i) {
             _maps.emplace_back(hard_max);
@@ -97,12 +94,19 @@ class QuantumState {
     QuantumState& operator=(QuantumState const&) = delete;
     QuantumState& operator=(QuantumState&&) = default;
 
+    BOOST_FORCEINLINE
+    constexpr auto spin_to_index(SpinVector const& spin) const noexcept
+        -> std::size_t
+    {
+        return std::to_integer<std::size_t>(*spin.data() & _index_mask);
+    }
+
     auto clear() -> void;
     auto insert(value_type &&) -> std::pair<map_type::iterator, bool>;
 
     auto find(SpinVector const& spin) -> std::optional<map_type::iterator>
     {
-        auto& table = _maps.at(spin_to_index(spin, _maps.size()));
+        auto& table = _maps.at(spin_to_index(spin));
         auto  where = table.find(spin);
         if (where != table.end()) { return {where}; }
         return std::nullopt;
@@ -142,24 +146,15 @@ class QuantumState {
     auto random_resample(std::size_t count, RandomGenerator& gen) -> void;
 };
 
+auto print(std::FILE*, QuantumState const&) -> void;
+auto read_state(std::FILE*, QuantumState&) -> void;
+
 template <class Function>
-auto QuantumState::for_each(Function&& fn) const -> void
+BOOST_FORCEINLINE auto QuantumState::for_each(Function&& fn) const -> void
 {
-    std::vector<std::pair<map_type::const_iterator, map_type::const_iterator>>
-        xs;
-    xs.reserve(number_workers());
     for (auto const& table : _maps) {
-        if (table.size() > 0) { xs.emplace_back(table.begin(), table.end()); }
-    }
-    while (!xs.empty()) {
-        for (std::size_t i = 0; i < xs.size(); ++i) {
-            auto& x = xs[i];
-            fn(*x.first);
-            ++x.first;
-            if (x.first == x.second) {
-                std::swap(x, xs.back());
-                xs.pop_back();
-            }
+        for (auto& x : table) {
+            fn(x);
         }
     }
 }
@@ -215,7 +210,7 @@ class Updater {
 
     auto operator()(std::pair<SpinVector, std::complex<double>> value) -> void
     {
-        if (_done) { start(); }
+        TCM_ASSERT(!_done); // if (_done) { start(); }
         while (!_queue.push(value))
             ;
     }
@@ -228,12 +223,13 @@ class Updater {
 };
 
 class QuantumStateBuilder {
+    QuantumState&                         _psi;
     std::vector<std::unique_ptr<Updater>> _updaters;
 
   public:
     using value_type = QuantumState::value_type;
 
-    QuantumStateBuilder(QuantumState& psi) : _updaters{}
+    QuantumStateBuilder(QuantumState& psi) : _psi{psi}, _updaters{}
     {
         TCM_ASSERT(
             psi.number_workers() > 0
@@ -265,8 +261,7 @@ class QuantumStateBuilder {
         -> QuantumStateBuilder&
     {
         TCM_ASSERT(_updaters.size() < (1ul << 8));
-        (*_updaters.at(spin_to_index(x.second, _updaters.size())))(
-            {x.second, x.first});
+        (*_updaters[_psi.spin_to_index(x.second)])({x.second, x.first});
         return *this;
     }
 };

@@ -32,6 +32,7 @@
 #include "quantum_state.hpp"
 #include "random.hpp"
 #include "random_sample.hpp"
+#include "parser_utils.hpp"
 #include <boost/math/special_functions/ulp.hpp>
 #include <nonstd/span.hpp>
 #include <numeric>
@@ -45,7 +46,7 @@ auto QuantumState::clear() -> void
 
 auto QuantumState::insert(value_type&& x) -> std::pair<map_type::iterator, bool>
 {
-    return _maps[spin_to_index(x.first, _maps.size())].insert(std::move(x));
+    return _maps[spin_to_index(x.first)].insert(std::move(x));
 }
 
 auto QuantumState::remove_least(std::size_t count) -> void
@@ -70,7 +71,7 @@ auto QuantumState::remove_least(std::size_t count) -> void
     std::partial_sort(begin(items), begin(items) + count, end(items),
         [](auto const& x, auto const& y) { return x.second < y.second; });
     for (std::size_t i = 0; i < count; ++i) {
-        auto& table = _maps.at(spin_to_index(items[i].first, _maps.size()));
+        auto& table = _maps.at(spin_to_index(items[i].first));
         TCM_ASSERT(table.count(items[i].first));
         table.erase(items[i].first);
     }
@@ -105,7 +106,7 @@ auto QuantumState::random_resample(std::size_t count, RandomGenerator& gen)
     for (auto i = std::size_t{0}; i < count; ++i) {
         auto const  index = dist(gen);
         auto const& x     = items[index];
-        _maps[spin_to_index(x.first, _maps.size())].insert(x);
+        _maps[spin_to_index(x.first)].insert(x);
     }
 }
 
@@ -137,6 +138,19 @@ auto QuantumState::random_resample(std::size_t count, RandomGenerator& gen)
             0ul, [](auto const acc, auto const& x) { return acc + x.size(); });
         if (size > _soft_max_size) { remove_least(size - _soft_max_size); }
     }
+}
+
+auto print(std::FILE* const stream, QuantumState const& psi) -> void
+{
+    psi.for_each([stream](auto const& x) {
+        print(stream, x.first);
+        if (std::fprintf(
+                stream, "\t%.10e\t%.10e\n", x.second.real(), x.second.imag())
+            < 0) {
+            throw_with_trace(std::runtime_error{
+                "fprintf() failed when writing psi to std::FILE*"});
+        }
+    });
 }
 
 auto operator<<(std::ostream& out, QuantumState const& psi) -> std::ostream&
@@ -174,3 +188,21 @@ auto operator>>(std::istream& is, QuantumState& x) -> std::istream&
     }
     return is;
 }
+
+auto read_state(std::FILE* const stream, QuantumState& state) -> void
+{
+    for_each_line(stream, [&state](auto line) {
+        if (line.empty() || line[0] == '#') return;
+        SpinVector spin;
+        double     real, imag;
+        std::tie(spin, line) = parse_spin(line);
+        std::tie(real, line) = parse_double(line);
+        std::tie(imag, line) = parse_double(line);
+        if (!state.insert({spin, std::complex{real, imag}}).second) {
+            throw_with_trace(std::runtime_error{
+                "Failed to parse |ψ₀〉: Duplicate basis elements."});
+        }
+    });
+}
+
+

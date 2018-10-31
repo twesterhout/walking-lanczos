@@ -32,6 +32,7 @@
 #pragma once
 
 #include <complex>
+#include <cstdio>
 #include <functional>
 #include <vector>
 
@@ -76,6 +77,10 @@ class Heisenberg {
     auto operator()(
         SpinVector, std::complex<double>, QuantumStateBuilder&) const -> void;
 
+#if 0
     friend auto operator>>(std::istream&, Heisenberg&) -> std::istream&;
+#endif
 };
+
+auto read_hamiltonian(std::FILE* const stream) -> Heisenberg;
 

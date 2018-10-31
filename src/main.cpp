@@ -139,6 +139,13 @@ auto read_hamiltonian(std::string const& hamiltonian_file_name) -> Hamiltonian
         throw std::runtime_error{"Hamiltonian specification file '"
                                  + hamiltonian_file_name + "' does not exist."};
     }
+
+    std::FILE* stream = fopen(hamiltonian_file_name.c_str(), "r");
+    if (stream == nullptr) {
+        std::exit(1);
+    }
+    return read_hamiltonian(stream);
+#if 0
     std::ifstream hamiltonian_file{hamiltonian_file_name};
     if (!hamiltonian_file) {
         throw std::runtime_error{
@@ -150,6 +157,7 @@ auto read_hamiltonian(std::string const& hamiltonian_file_name) -> Hamiltonian
         throw std::runtime_error{"Failed to parse the Hamiltonian."};
     }
     return {std::move(hamiltonian)};
+#endif
 }
 } // namespace
 
@@ -182,6 +190,8 @@ int main(int argc, char** argv)
         state = diffusion_loop(lambda, hamiltonian, state, iterations);
         auto const final_energy = energy(hamiltonian, state);
         *output_file << "# => E = " << final_energy << '\n' << state;
+
+        print(stdout, state);
         return EXIT_SUCCESS;
     }
     catch (std::exception const& e) {

@@ -30,10 +30,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "hamiltonian.hpp"
+#include "parser_utils.hpp"
 #include "quantum_state.hpp"
-
 #include <nonstd/span.hpp>
-#include <charconv>
 
 auto Heisenberg::operator()(SpinVector spin, std::complex<double> coeff,
     QuantumStateBuilder& psi) const -> void
@@ -73,6 +72,7 @@ auto energy(Hamiltonian const& hamiltonian, QuantumState const& psi)
     return energy;
 }
 
+#if 0
 inline auto operator>>(std::istream& is, std::pair<int, int>& edge)
     -> std::istream&
 {
@@ -93,54 +93,11 @@ inline auto operator>>(std::istream& is, std::pair<int, int>& edge)
     expect(')');
     return is;
 }
+#endif
 
-inline auto skip_spaces(nonstd::span<char const> const str) noexcept
-    -> nonstd::span<char const>
-{
-    using index_type = nonstd::span<char const>::index_type;
-    auto i           = index_type{0};
-    for (; i < str.size() && std::isspace(str[i]); ++i)
-        ;
-    return str.subspan(i);
-}
 
-inline auto parse_char(char const c, nonstd::span<char const> const str)
-    -> nonstd::span<char const>
-{
-    if (str.empty())
-        throw_with_trace(
-            std::runtime_error{"Expected '" + std::string{c}
-                               + "', but reached the end of input."});
-    if (str[0] != c)
-        throw_with_trace(
-            std::runtime_error{"Expected '" + std::string{c} + "', but got '"
-                               + std::string{str[0]} + "'."});
-    return str.subspan(1);
-}
-
-inline auto parse_int(nonstd::span<char const> str)
-    -> std::tuple<int, nonstd::span<char const>>
-{
-    int x;
-    auto [end, status] =
-        std::from_chars(str.data(), str.data() + str.size(), x);
-    if (status == std::errc::invalid_argument) {
-        auto const count = static_cast<std::size_t>(std::min(str.size(), 10l));
-        throw_with_trace(
-            std::runtime_error{"Expected an integer, but got \""
-                               + std::string(str.data(), count) + "...\"."});
-    }
-    if (status == std::errc::result_out_of_range) {
-        auto const count = static_cast<std::size_t>(end - str.data());
-        throw_with_trace(std::runtime_error{
-            "Encountered an overflow when parsing an integer from \""
-            + std::string(str.data(), count) + "\"."});
-    }
-    TCM_ASSERT(std::make_error_code(status) == std::error_code{});
-    return {x, str.subspan(end - str.data())};
-}
-
-inline auto parse_edge(nonstd::span<char const> str)
+namespace {
+auto parse_edge(nonstd::span<char const> str)
     -> std::tuple<std::pair<int, int>, nonstd::span<char const>>
 {
     std::pair<int, int> edge;
@@ -152,7 +109,6 @@ inline auto parse_edge(nonstd::span<char const> str)
     return {edge, str};
 }
 
-namespace {
 auto parse_adjacency_list(nonstd::span<char const> str)
     -> std::tuple<std::vector<std::pair<int, int>>, nonstd::span<char const>>
 {
@@ -187,10 +143,11 @@ auto parse_adjacency_list(nonstd::span<char const> str)
                 "Expected ',' or ']', but got '" + std::string{str[0]} + "'."});
         }
     } while (true);
-    return {edges, str};
+    return {std::move(edges), str};
 }
 } // namespace
 
+#if 0
 template <class T>
 auto operator>>(std::istream& is, std::vector<T>& x) -> std::istream&
 {
@@ -231,7 +188,61 @@ auto operator>>(std::istream& is, std::vector<T>& x) -> std::istream&
     } while (ch != ']');
     return is;
 }
+#endif
 
+auto read_hamiltonian(std::FILE* const stream) -> Heisenberg
+{
+    using Specs = std::vector<Heisenberg::spec_type>;
+    using Edges = std::vector<Heisenberg::edge_type>;
+
+    Specs specs;
+    for_each_line(stream, [&specs](auto line) {
+        if (!line.empty() && line[0] != '#') {
+            Edges  edges;
+            double coupling;
+            std::tie(coupling, line) = parse_double(line);
+            std::tie(edges, line)    = parse_adjacency_list(line);
+            specs.emplace_back(coupling, std::move(edges));
+        }
+    });
+    return Heisenberg{std::move(specs)};
+}
+
+#if 0
+auto read_hamiltonian(std::FILE* const stream) -> Heisenberg
+{
+    char*          line_ptr    = nullptr;
+    std::size_t    line_length = 0;
+    std::ptrdiff_t bytes_read  = 0;
+    struct free_line_ptr {
+        char*& _p;
+
+        ~free_line_ptr()
+        {
+            if (_p != nullptr) { ::free(_p); }
+        }
+    } _dummy{line_ptr};
+
+    std::vector<Heisenberg::spec_type> specs;
+    while ((bytes_read = ::getline(&line_ptr, &line_length, stream)) != -1) {
+        nonstd::span<char const>           line{line_ptr, bytes_read};
+        if (!line.empty() && line[0] != '#') {
+            std::vector<Heisenberg::edge_type> edges;
+            double                             coupling;
+            std::tie(coupling, line) = parse_double(line);
+            std::tie(edges, line)    = parse_adjacency_list(line);
+            specs.emplace_back(coupling, std::move(edges));
+        }
+    }
+    if (!std::feof(stream) && std::ferror(stream)) {
+        throw_with_trace(std::system_error{errno, std::generic_category(),
+            "Failed to read the Heisenberg Hamiltonian."});
+    }
+    return Heisenberg{std::move(specs)};
+}
+#endif
+
+#if 0
 auto operator>>(std::istream& is, Heisenberg& x) -> std::istream&
 {
     std::string                        line;
@@ -251,4 +262,5 @@ auto operator>>(std::istream& is, Heisenberg& x) -> std::istream&
     x._specs = std::move(specs);
     return is;
 }
+#endif
 

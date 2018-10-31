@@ -1,7 +1,38 @@
 
 #include "spin_chain.hpp"
+#include "parser_utils.hpp"
+
+#include <nonstd/span.hpp>
+
 #include <cstdio>
 #include <iostream>
+
+
+auto print(std::FILE* const stream, SpinVector const& spin) -> void
+{
+    auto const to_char = [](Spin const x) TCM_NOEXCEPT -> char {
+        switch (x) {
+        case Spin::down: return '0';
+        case Spin::up: return '1';
+#if defined(BOOST_GCC)
+        // GCC fails to notice that all cases have already been handled.
+        default: TCM_ASSERT(false); std::terminate();
+#endif
+        }
+    };
+
+    char spin_str[SpinVector::max_size() + 1];
+    spin_str[std::size(spin_str) - 1] = '\0';
+    TCM_ASSERT(spin.size() <= SpinVector::max_size());
+    for (auto i = 0; i < spin.size(); ++i) {
+        spin_str[i] = to_char(spin[i]);
+    }
+
+    auto const status = std::fputs(spin_str, stream);
+    if (status == EOF && std::ferror(stream)) {
+        throw_with_trace(std::runtime_error{"std::fputs() failed"});
+    }
+}
 
 #if 1
 auto operator<<(std::ostream& out, SpinVector const& x) -> std::ostream&
@@ -24,31 +55,10 @@ auto operator<<(std::ostream& out, SpinVector const& x) -> std::ostream&
 }
 #endif
 
-[[nodiscard]] auto fput_spin(
-    SpinVector const& spin, std::FILE* const stream) noexcept -> int
+auto parse_spin(nonstd::span<char const> str)
+    -> std::pair<SpinVector, nonstd::span<char const>>
 {
-    auto const to_char = [](Spin const x) TCM_NOEXCEPT -> char {
-        switch (x) {
-        case Spin::down: return '0';
-        case Spin::up: return '1';
-#if defined(BOOST_GCC)
-        // GCC fails to notice that all cases have already been handled.
-        default: TCM_ASSERT(false); std::terminate();
-#endif
-        }
-    };
-
-    char spin_str[SpinVector::max_size() + 1];
-    for (auto i = 0; i < spin.size(); ++i) {
-        spin_str[i] = to_char(spin[i]);
-    }
-    spin_str[std::size(spin_str) - 1] = '\0';
-
-    return std::fputs(spin_str, stream);
-}
-
-auto strtospin(char* const str, char** const str_end) -> SpinVector
-{
+    using index_type = nonstd::span<char const>::index_type;
     auto const to_spin = [](char const ch) -> Spin {
         switch (ch) {
         case '0': return Spin::down;
@@ -60,62 +70,34 @@ auto strtospin(char* const str, char** const str_end) -> SpinVector
                                    + std::string{ch}});
         }
     };
-
-    auto i = std::size_t{0};
-    // Skipping spaces
-    while (str[i] != '\0' && std::isspace(str[i]))
-        ++i;
-    if (str[i] == '\0') {
-        throw_with_trace(std::runtime_error{
-            "Failed to parse a spin-1/2 configuration: expected a spin "
-            "configuration, but got a bunch of spaces."});
-    }
-    // Parsing the actual configuration
+    str = skip_spaces(str);
     Spin spin[SpinVector::max_size()];
-    auto spin_index = std::size_t{0};
-    for (; spin_index < std::size(spin) && str[i] != '\0'
+    auto i = index_type{0};
+    for (; i < static_cast<index_type>(std::size(spin)) && i < std::size(str)
            && !std::isspace(str[i]);
-         ++i, ++spin_index) {
-        spin[spin_index] = to_spin(str[i]);
+         ++i) {
+        spin[i] = to_spin(str[i]);
     }
     // Overflow?
-    if (spin_index == std::size(spin) && str[i] != '\0' && !std::isspace(str[i])) {
+    if (i == static_cast<index_type>(std::size(spin)) && i < std::size(str)
+        && !std::isspace(str[i])) {
         throw_with_trace(
             std::runtime_error{"Failed to parse a spin-1/2 configuration: "
                                "configurations longer than "
                                + std::to_string(SpinVector::max_size())
                                + " are not (yet) supported."});
     }
-
-    if (str_end != nullptr) { *str_end = str + i; }
-    return SpinVector{std::begin(spin), std::end(spin)};
+    return {SpinVector{std::begin(spin), std::begin(spin) + i}, str.subspan(i)};
 }
 
 #if 1
 auto operator>>(std::istream& in, SpinVector& x) -> std::istream&
 {
-    auto const to_spin = [&in](char const ch) -> Spin {
-        switch (ch) {
-        case '0': return Spin::down;
-        case '1': return Spin::up;
-        default:
-            in.unget();
-            in.setstate(std::ios_base::failbit);
-            throw_with_trace(
-                std::runtime_error{"Failed to parse a spin-1/2 configuration: "
-                                   "Allowed spin values are {0, 1}, but got "
-                                   + std::string{ch}});
-        }
-    };
-    std::vector<Spin> spin;
-    spin.reserve(256);
-    while (std::isspace(in.peek())) {
-        in.get();
-    }
-    while (std::isdigit(in.peek())) {
-        spin.push_back(to_spin(static_cast<char>(in.get())));
-    }
-    x = SpinVector{std::begin(spin), std::end(spin)};
+    std::string str;
+    in >> str;
+    auto const [spin, rest] = parse_spin({str});
+    TCM_ASSERT(rest.empty());
+    x = spin;
     return in;
 }
 #endif

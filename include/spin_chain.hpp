@@ -32,12 +32,12 @@
 #pragma once
 
 #include "config.hpp"
+#include <nonstd/span.hpp>
 #include <boost/functional/hash.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iostream> // cout
-#include <iterator> // for std::size
+#include <cstdio>
 #include <utility>
 #include <immintrin.h>
 
@@ -237,6 +237,7 @@ class SpinVector {
 
 auto operator<<(std::ostream&, SpinVector const&) -> std::ostream&;
 auto operator>>(std::istream&, SpinVector&) -> std::istream&;
-[[nodiscard]] auto fput_spin(SpinVector const&, std::FILE*) noexcept -> int;
-auto strtospin(char* const str, char** const str_end) -> SpinVector;
+auto print(std::FILE*, SpinVector const&) -> void;
+auto parse_spin(nonstd::span<char const>)
+    -> std::pair<SpinVector, nonstd::span<char const>>;
 
