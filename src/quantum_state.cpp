@@ -30,9 +30,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "quantum_state.hpp"
+#include "parser_utils.hpp"
 #include "random.hpp"
 #include "random_sample.hpp"
-#include "parser_utils.hpp"
 #include <boost/math/special_functions/ulp.hpp>
 #include <nonstd/span.hpp>
 #include <numeric>
@@ -61,7 +61,7 @@ auto QuantumState::remove_least(std::size_t count) -> void
     auto const items        = nonstd::span<item_type>{
         items_buffer.get(), static_cast<index_type>(size)};
     {
-        auto i = std::size_t{0};
+        auto i = index_type{0};
         for (auto const& table : _maps) {
             for (auto const& x : table) {
                 items[i++] = {x.first, std::norm(x.second)};
@@ -70,8 +70,8 @@ auto QuantumState::remove_least(std::size_t count) -> void
     }
     std::partial_sort(begin(items), begin(items) + count, end(items),
         [](auto const& x, auto const& y) { return x.second < y.second; });
-    for (std::size_t i = 0; i < count; ++i) {
-        auto& table = _maps.at(spin_to_index(items[i].first));
+    for (auto i = index_type{0}; i < static_cast<index_type>(count); ++i) {
+        auto& table = _maps[spin_to_index(items[i].first)];
         TCM_ASSERT(table.count(items[i].first));
         table.erase(items[i].first);
     }
@@ -81,15 +81,18 @@ auto QuantumState::random_resample(std::size_t count, RandomGenerator& gen)
     -> void
 {
     using std::begin, std::end;
+    using index_type = nonstd::span<value_type>::index_type;
     auto const size =
         std::accumulate(std::begin(_maps), std::end(_maps), std::size_t{0},
             [](auto const acc, auto const& x) { return acc + x.size(); });
     auto const items_buffer = std::make_unique<value_type[]>(size);
-    auto const items = nonstd::span<value_type>{items_buffer.get(), size};
+    auto const items        = nonstd::span<value_type>{
+        items_buffer.get(), static_cast<index_type>(size)};
     auto const weights_buffer = std::make_unique<double[]>(size);
-    auto const weights = nonstd::span<double>{weights_buffer.get(), size};
+    auto const weights        = nonstd::span<double>{
+        weights_buffer.get(), static_cast<index_type>(size)};
     {
-        auto i = std::size_t{0};
+        auto i = index_type{0};
         for (auto const& table : _maps) {
             for (auto const& x : table) {
                 items[i++] = x;
@@ -99,12 +102,10 @@ auto QuantumState::random_resample(std::size_t count, RandomGenerator& gen)
     std::transform(begin(items), end(items), begin(weights),
         [](auto const& x) { return std::norm(x.second); });
 
-    for (auto& table : _maps) {
-        table.clear();
-    }
+    clear();
     WeightedDistribution dist{weights};
     for (auto i = std::size_t{0}; i < count; ++i) {
-        auto const  index = dist(gen);
+        auto const  index = static_cast<index_type>(dist(gen));
         auto const& x     = items[index];
         _maps[spin_to_index(x.first)].insert(x);
     }
@@ -153,6 +154,7 @@ auto print(std::FILE* const stream, QuantumState const& psi) -> void
     });
 }
 
+#if 0
 auto operator<<(std::ostream& out, QuantumState const& psi) -> std::ostream&
 {
     psi.for_each([&out](auto const& x) {
@@ -161,7 +163,9 @@ auto operator<<(std::ostream& out, QuantumState const& psi) -> std::ostream&
     });
     return out;
 }
+#endif
 
+#if 0
 auto operator>>(std::istream& is, QuantumState& x) -> std::istream&
 {
     std::string line;
@@ -188,6 +192,7 @@ auto operator>>(std::istream& is, QuantumState& x) -> std::istream&
     }
     return is;
 }
+#endif
 
 auto read_state(std::FILE* const stream, QuantumState& state) -> void
 {
@@ -204,5 +209,4 @@ auto read_state(std::FILE* const stream, QuantumState& state) -> void
         }
     });
 }
-
 

@@ -6,7 +6,6 @@
 #include <boost/exception/enable_error_info.hpp>
 #include <boost/stacktrace.hpp>
 #include <exception>
-#include <iostream>
 #include <type_traits>
 
 #define TCM_ASSERT BOOST_ASSERT
@@ -35,12 +34,11 @@ namespace boost {
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 #endif
 inline void assertion_failed_msg(char const* expr, char const* msg,
-    char const* function, char const* /*file*/, long /*line*/)
+    char const* function, char const* file, long line)
 {
-    std::cerr << "Expression '" << expr << "' is false in function '"
-              << function << "': " << (msg ? msg : "<...>") << ".\n"
-              << "Backtrace:\n"
-              << boost::stacktrace::stacktrace() << '\n';
+    std::fprintf(stderr,
+        "Expression '%s' is false in function '%s': %s: %li: %s\n", expr,
+        function, file, line, (msg ? msg : "<...>"));
     std::terminate();
 }
 #if defined(BOOST_CLANG)

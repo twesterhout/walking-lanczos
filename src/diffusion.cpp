@@ -56,17 +56,19 @@ auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
         throw_with_trace(
             std::runtime_error{"Number of iterations must be positive!"});
     }
-    std::cerr << "[1/" << iterations << "]";
+    std::fprintf(stdout, "[1/%zu]", iterations);
+    std::fflush(stdout);
     QuantumState state = trotter_step(lambda, hamiltonian, psi);
     state.shrink();
     state.normalize();
     for (auto i = 1ul; i < iterations; ++i) {
-        std::cerr << "\r[" << (i + 1) << "/" << iterations << "]";
+        std::fprintf(stdout, "\r[%zu/%zu]", (i + 1), iterations);
+        std::fflush(stdout);
         state = trotter_step(lambda, hamiltonian, state);
         state.shrink();
         state.normalize();
     }
-    std::cerr << std::endl;
+    std::fprintf(stdout, "\n");
     return state;
 }
 

@@ -34,7 +34,6 @@
 #include "random.hpp"
 #include "spin_chain.hpp"
 #include <complex>
-#include <iosfwd>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -82,7 +81,7 @@ class QuantumState {
                 "Currently, at most 64 workers can be used."});
         }
 
-        _index_mask = std::byte{number_workers - 1u};
+        _index_mask = static_cast<std::byte>(number_workers - 1u);
         _maps.reserve(number_workers);
         for (std::size_t i = 0; i < number_workers; ++i) {
             _maps.emplace_back(hard_max);
@@ -138,8 +137,10 @@ class QuantumState {
     template <class Function>
     auto for_each(Function&&) const -> void;
 
+#if 0
     friend auto operator>>(std::istream&, QuantumState&) -> std::istream&;
     friend auto operator<<(std::ostream&, QuantumState const&) -> std::ostream&;
+#endif
 
   private:
     auto remove_least(std::size_t count) -> void;

@@ -32,15 +32,13 @@
 #pragma once
 
 #include "config.hpp"
-#include <nonstd/span.hpp>
-#include <boost/functional/hash.hpp>
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <utility>
-#include <immintrin.h>
 
+#include <boost/functional/hash.hpp>
+#include <nonstd/span.hpp>
+
+#include <algorithm>
+#include <cstdio>
+#include <immintrin.h>
 
 enum class Spin : unsigned char {
     down = 0x00,
@@ -99,7 +97,8 @@ class SpinVector {
         /// \brief Constructs a reference to a spin given a reference to the
         /// byte where the spin is contained and the index within that byte.
         constexpr SpinReference(std::byte& ref, int const n) TCM_NOEXCEPT
-            : _ref{ref}, _i{7 - n}
+            : _ref{ref}
+            , _i{7 - n}
         {
             TCM_ASSERT(0 <= n && n < 8);
         }
@@ -171,27 +170,6 @@ class SpinVector {
         return _data.spin;
     }
 
-#if 0
-    auto print(std::ostream& out) const -> std::ostream&
-    {
-        auto const to_char = [](Spin const x) TCM_NOEXCEPT -> char {
-            switch (x) {
-            case Spin::down: return '0';
-            case Spin::up: return '1';
-#if defined(BOOST_GCC)
-            // GCC fails to notice that all cases have already been handled.
-            default: TCM_ASSERT(false); std::terminate();
-#endif
-            }
-        };
-
-        for (auto i = 0; i < size(); ++i) {
-            out << to_char((*this)[i]);
-        }
-        return out;
-    }
-#endif
-
     auto operator==(SpinVector const other) const noexcept -> bool
     {
         return _mm_movemask_epi8(_data.as_ints == other._data.as_ints)
@@ -225,7 +203,7 @@ class SpinVector {
             std::byte     spin[14];
             std::uint16_t size;
         };
-        __m128i   as_ints;
+        __m128i as_ints;
     } _data;
     static_assert(sizeof(_data) == 16);
 #if defined(BOOST_GCC)
@@ -235,8 +213,8 @@ class SpinVector {
 #endif
 };
 
-auto operator<<(std::ostream&, SpinVector const&) -> std::ostream&;
-auto operator>>(std::istream&, SpinVector&) -> std::istream&;
+// auto operator<<(std::ostream&, SpinVector const&) -> std::ostream&;
+// auto operator>>(std::istream&, SpinVector&) -> std::istream&;
 auto print(std::FILE*, SpinVector const&) -> void;
 auto parse_spin(nonstd::span<char const>)
     -> std::pair<SpinVector, nonstd::span<char const>>;

@@ -35,25 +35,42 @@
 #include <boost/exception/get_error_info.hpp>
 #include <boost/optional.hpp>
 #include <boost/program_options.hpp>
+#include <clocale>
+#include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <iostream>
 #include <optional>
 
 namespace po = boost::program_options;
 
-using IStreamPtr = std::unique_ptr<std::istream, void (*)(std::istream*)>;
-using OStreamPtr = std::unique_ptr<std::ostream, void (*)(std::ostream*)>;
+using FilePtr = std::unique_ptr<std::FILE, void (*)(std::FILE*)>;
 
 namespace {
-auto parse_options(int argc, char** argv, IStreamPtr& input_file,
-    OStreamPtr& output_file, std::string& hamiltonian_file_name, double& lambda,
+auto open_file(char const* filename, char const* mode) -> FilePtr
+{
+    auto fp = std::fopen(filename, mode);
+    if (fp == nullptr) {
+        if (errno != 0) {
+            throw_with_trace(
+                std::system_error{errno, std::generic_category(), filename});
+        }
+        else {
+            throw_with_trace(std::runtime_error{
+                "Failed to open '" + std::string{filename} + "'"});
+        }
+    }
+    return {fp, [](auto* p) { std::fclose(p); }};
+}
+
+auto parse_options(int argc, char** argv, FilePtr& input_file,
+    FilePtr& output_file, FilePtr& hamiltonian_file, double& lambda,
     std::size_t& iterations, std::size_t& soft_max,
     boost::optional<std::size_t>& hard_max, bool& use_random_sampling) -> bool
 {
     std::string                  input_file_name;
     boost::optional<std::string> output_file_name;
+    std::string                  hamiltonian_file_name;
     po::options_description      cmdline_options{"Command-line options"};
+    use_random_sampling = false;
     // clang-format off
     cmdline_options.add_options()
         ("help", "Produce the help message.")
@@ -61,7 +78,8 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
             "File containing the initial quantum state. '-' can be used to "
             "indicate that the initial state should be read from the standard input.")
         ("output-file,o", po::value(&output_file_name),
-            "Where to save the final quantum state.")
+            "File where to save the final quantum state. If not given the "
+            "final state will be written to standard output.")
         ("hamiltonian,H", po::value(&hamiltonian_file_name)->required(),
             "The file containing the Hamiltonian specification.")
         ("lambda,L", po::value(&lambda)->default_value(1.0),
@@ -75,8 +93,8 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
             "be chosen carefully, because too low a value will result in a lot of "
             "rehashing, but too high a value will use more memory and result in "
             "more cache misses.")
-        ("random", po::value(&use_random_sampling)->default_value(false),
-            "Whether to use random sampling.")
+        ("random", po::value(&use_random_sampling)->implicit_value(true)->zero_tokens(),
+            "Use random sampling.")
     ;
     // clang-format on
     po::positional_options_description positional;
@@ -89,120 +107,96 @@ auto parse_options(int argc, char** argv, IStreamPtr& input_file,
               .run(),
         vm);
     if (vm.count("help")) {
-        std::cout << cmdline_options << '\n';
+        std::ostringstream msg;
+        msg << cmdline_options << '\n';
+        auto const str = msg.str();
+        std::fputs(str.c_str(), stdout);
         return false;
     }
     po::notify(vm);
 
     if (input_file_name == "-") {
-        input_file = IStreamPtr{std::addressof(std::cin), [](auto*) {}};
-    }
-    else if (!std::filesystem::exists({input_file_name})) {
-        throw std::runtime_error{
-            "Input file '" + input_file_name + "' does not exist."};
+        input_file = FilePtr{stdin, [](auto*) {}};
     }
     else {
-        input_file = IStreamPtr{new std::ifstream{input_file_name},
-            [](auto* p) { std::default_delete<std::istream>{}(p); }};
-        if (!*input_file) {
-            throw std::runtime_error{
-                "Could not open '" + input_file_name + "' for reading."};
-        }
+        input_file = open_file(input_file_name.c_str(), "r");
     }
 
     if (!output_file_name) {
-        output_file = OStreamPtr{std::addressof(std::cout), [](auto*) {}};
+        output_file = FilePtr{stdout, [](auto*) {}};
+    }
+    // Issue #1: Prevent the user from overwriting the input file.
+    else if (std::filesystem::exists({*output_file_name})
+             && input_file_name != "-"
+             && std::filesystem::equivalent(
+                    {*output_file_name}, {input_file_name})) {
+        throw std::runtime_error{"Input file '" + input_file_name
+                                 + "' and output file '" + *output_file_name
+                                 + "' are the same."};
     }
     else {
-        // Issue #1: Prevent the user from overwriting the input file.
-        if (std::filesystem::exists({*output_file_name})
-            && input_file_name != "-"
-            && std::filesystem::equivalent(
-                   {*output_file_name}, {input_file_name})) {
-            throw std::runtime_error{"Input file '" + input_file_name
-                                     + "' and output file '" + *output_file_name
-                                     + "' are the same."};
-        }
-        output_file = OStreamPtr{new std::ofstream{*output_file_name},
-            [](auto* p) { std::default_delete<std::ostream>{}(p); }};
-        if (!*output_file) {
-            throw std::runtime_error{
-                "Could not open '" + *output_file_name + "' for writing."};
-        }
+        output_file = open_file(output_file_name->c_str(), "w");
     }
+
+    hamiltonian_file = open_file(hamiltonian_file_name.c_str(), "r");
     return true;
-}
-
-auto read_hamiltonian(std::string const& hamiltonian_file_name) -> Hamiltonian
-{
-    if (!std::filesystem::exists({hamiltonian_file_name})) {
-        throw std::runtime_error{"Hamiltonian specification file '"
-                                 + hamiltonian_file_name + "' does not exist."};
-    }
-
-    std::FILE* stream = fopen(hamiltonian_file_name.c_str(), "r");
-    if (stream == nullptr) {
-        std::exit(1);
-    }
-    return read_hamiltonian(stream);
-#if 0
-    std::ifstream hamiltonian_file{hamiltonian_file_name};
-    if (!hamiltonian_file) {
-        throw std::runtime_error{
-            "Could not open '" + hamiltonian_file_name + "' for reading."};
-    }
-
-    Heisenberg hamiltonian;
-    if (!(hamiltonian_file >> hamiltonian) && !hamiltonian_file.eof()) {
-        throw std::runtime_error{"Failed to parse the Hamiltonian."};
-    }
-    return {std::move(hamiltonian)};
-#endif
 }
 } // namespace
 
 int main(int argc, char** argv)
 {
     try {
-        IStreamPtr                   input_file{nullptr, [](auto*) {}};
-        OStreamPtr                   output_file{nullptr, [](auto*) {}};
-        std::string                  hamiltonian_file_name;
+        std::setlocale(LC_ALL, ""); // WARNING: Don't remove me!
+        FilePtr                      input_file{nullptr, [](auto*) {}};
+        FilePtr                      output_file{nullptr, [](auto*) {}};
+        FilePtr                      hamiltonian_file{nullptr, [](auto*) {}};
         double                       lambda;
         std::size_t                  iterations;
         std::size_t                  soft_max;
         boost::optional<std::size_t> hard_max;
         bool                         use_random_sampling;
 
-        auto const proceed = parse_options(argc, argv, input_file, output_file,
-            hamiltonian_file_name, lambda, iterations, soft_max, hard_max,
-            use_random_sampling);
+        auto const proceed =
+            parse_options(argc, argv, input_file, output_file, hamiltonian_file,
+                lambda, iterations, soft_max, hard_max, use_random_sampling);
         if (!proceed) { return EXIT_SUCCESS; }
 
         QuantumState state{soft_max, hard_max ? *hard_max : 2 * soft_max, 1,
             use_random_sampling};
-        *input_file >> state;
-        auto const hamiltonian    = read_hamiltonian(hamiltonian_file_name);
-        auto const initial_energy = energy(hamiltonian, state);
-        *output_file << "# Result of evaluating (Λ - H)ⁿ|ψ₀〉for\n"
-                     << "# Λ = " << lambda << '\n'
-                     << "# n = " << iterations << '\n'
-                     << "# E₀ = 〈ψ₀|H|ψ₀〉= " << initial_energy << '\n';
-        state = diffusion_loop(lambda, hamiltonian, state, iterations);
-        auto const final_energy = energy(hamiltonian, state);
-        *output_file << "# => E = " << final_energy << '\n' << state;
+        read_state(input_file.get(), state);
+        auto const hamiltonian    = read_hamiltonian(hamiltonian_file.get());
 
-        print(stdout, state);
+        auto const initial_energy = energy(hamiltonian, state);
+        std::fprintf(output_file.get(),
+            "# Result of evaluating (Λ - H)ⁿ|ψ₀〉for\n"
+            "# Λ = %g\n"
+            "# n = %zu\n"
+            "# E₀ = 〈ψ₀|H|ψ₀〉= %lf + %.2ei\n",
+            lambda, iterations, initial_energy.real(), initial_energy.imag());
+        std::fflush(output_file.get());
+
+        state = diffusion_loop(lambda, hamiltonian, state, iterations);
+
+        auto const final_energy = energy(hamiltonian, state);
+        std::fprintf(output_file.get(),
+            "# => E = %lf + %.2ei\n",
+            final_energy.real(), final_energy.imag());
+        print(output_file.get(), state);
         return EXIT_SUCCESS;
     }
     catch (std::exception const& e) {
+        std::fprintf(stderr, "Error: %s\n", e.what());
         auto const* st = boost::get_error_info<errinfo_backtrace>(e);
-        std::cerr << "Error: " << e.what() << '\n';
-        if (st != nullptr) { std::cerr << "Backtrace:\n" << *st << '\n'; }
+        if (st != nullptr) {
+            std::ostringstream msg;
+            msg << *st << '\n';
+            auto const str = msg.str();
+            std::fprintf(stderr, "Backtrace:\n%s\n", str.c_str());
+        }
         return EXIT_FAILURE;
     }
     catch (...) {
-        std::cerr << "Error: "
-                  << "Unknown error occured." << '\n';
+        std::fprintf(stderr, "Error: unknown error occured.\n");
         return EXIT_FAILURE;
     }
 }

@@ -22,8 +22,8 @@ auto print(std::FILE* const stream, SpinVector const& spin) -> void
     };
 
     char spin_str[SpinVector::max_size() + 1];
-    spin_str[std::size(spin_str) - 1] = '\0';
     TCM_ASSERT(spin.size() <= SpinVector::max_size());
+    spin_str[spin.size()] = '\0';
     for (auto i = 0; i < spin.size(); ++i) {
         spin_str[i] = to_char(spin[i]);
     }
@@ -34,7 +34,7 @@ auto print(std::FILE* const stream, SpinVector const& spin) -> void
     }
 }
 
-#if 1
+#if 0
 auto operator<<(std::ostream& out, SpinVector const& x) -> std::ostream&
 {
     auto const to_char = [](Spin const s) TCM_NOEXCEPT -> char {
@@ -90,7 +90,7 @@ auto parse_spin(nonstd::span<char const> str)
     return {SpinVector{std::begin(spin), std::begin(spin) + i}, str.subspan(i)};
 }
 
-#if 1
+#if 0
 auto operator>>(std::istream& in, SpinVector& x) -> std::istream&
 {
     std::string str;
