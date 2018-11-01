@@ -32,6 +32,16 @@
 #include "diffusion.hpp"
 #include "quantum_state.hpp"
 
+#include <chrono>
+#include <optional>
+
+#if !(_POSIX_C_SOURCE >= 1 || _XOPEN_SOURCE || _POSIX_SOURCE)
+#error "fileno is a POSIX-specific thing"
+#else
+#include <stdio.h>
+#include <unistd.h>
+#endif
+
 auto trotter_step(double const lambda, Hamiltonian const& hamiltonian,
     QuantumState const& psi) -> QuantumState
 {
@@ -49,6 +59,50 @@ auto trotter_step(double const lambda, Hamiltonian const& hamiltonian,
     return h_psi;
 }
 
+namespace {
+auto make_status_updater(std::FILE* const stream) -> std::function<void(
+    std::size_t, std::size_t, std::optional<std::chrono::seconds>)>
+{
+    int fd = ::fileno(stream);
+    if (fd == -1) {
+        auto const status = std::error_code{errno, std::generic_category()};
+        errno             = 0;
+        throw_with_trace(std::system_error{status, "fileno(FILE*)"});
+    }
+    if (::isatty(fd)) {
+        // Is a terminal
+        return [stream](auto const i, auto const n, auto const eta) {
+            if (eta.has_value()) {
+                std::fprintf(stream, "\r[%zu/%zu] ETA: %li:%li                ",
+                    i, n, eta->count() / 60l, eta->count() % 60l);
+            }
+            else {
+                std::fprintf(
+                    stream, "\r[%zu/%zu]                             ", i, n);
+            }
+            std::fflush(stream);
+        };
+    }
+    else if (errno == EINVAL || errno == ENOTTY) {
+        // Is a file or pipe
+        return [stream](auto const i, auto const n, auto const eta) {
+            if (eta.has_value()) {
+                std::fprintf(stream, "[%zu/%zu] ETA: %li:%li\n", i, n,
+                    eta->count() / 60, eta->count() % 60);
+            }
+            else {
+                std::fprintf(stream, "[%zu/%zu]\n", i, n);
+            }
+            std::fflush(stream);
+        };
+    }
+    else { // invalid file descriptor: should never happen
+        auto const status = std::error_code{errno, std::generic_category()};
+        throw_with_trace(std::system_error{status, "isatty(int)"});
+    }
+}
+} // namespace
+
 auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
     QuantumState const& psi, std::size_t const iterations) -> QuantumState
 {
@@ -56,17 +110,24 @@ auto diffusion_loop(double const lambda, Hamiltonian const& hamiltonian,
         throw_with_trace(
             std::runtime_error{"Number of iterations must be positive!"});
     }
-    std::fprintf(stdout, "[1/%zu]", iterations);
-    std::fflush(stdout);
+    auto const status_updater = make_status_updater(stdout);
+    auto start = std::chrono::steady_clock::now();
+    status_updater(1, iterations, std::nullopt);
     QuantumState state = trotter_step(lambda, hamiltonian, psi);
     state.shrink();
     state.normalize();
+    auto stop = std::chrono::steady_clock::now();
+    auto max = stop - start;
     for (auto i = 1ul; i < iterations; ++i) {
-        std::fprintf(stdout, "\r[%zu/%zu]", (i + 1), iterations);
-        std::fflush(stdout);
+        auto const eta = std::chrono::duration_cast<std::chrono::seconds>(
+            (iterations - i) * max);
+        start = std::chrono::steady_clock::now();
+        status_updater(i + 1, iterations, eta);
         state = trotter_step(lambda, hamiltonian, state);
         state.shrink();
         state.normalize();
+        stop = std::chrono::steady_clock::now();
+        if (stop - start > max) { max = stop - start; }
     }
     std::fprintf(stdout, "\n");
     return state;
